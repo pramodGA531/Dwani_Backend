@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
+    .container { max-width: 500px; margin: 40px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .header { background: #16a34a; padding: 24px; text-align: center; }
+    .header h1 { color: #fff; margin: 0; font-size: 22px; }
+    .body { padding: 32px; color: #333; line-height: 1.6; }
+    .cta { display: inline-block; margin-top: 24px; padding: 12px 28px; background: #16a34a; color: #fff; border-radius: 6px; text-decoration: none; font-weight: bold; }
+    .footer { background: #f9f9f9; padding: 16px; text-align: center; font-size: 12px; color: #888; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header"><h1>Account Approved ✅</h1></div>
+    <div class="body">
+      <p>Hi <strong>{{ email }}</strong>,</p>
+      <p>Great news! Your recruiter account on the <strong>AI Interview Platform</strong> has been <strong>approved</strong> by the admin.</p>
+      <p>You can now log in and start creating job listings and inviting candidates for interviews.</p>
+      <a href="{{ login_url }}" class="cta">Log In to Dashboard →</a>
+    </div>
+    <div class="footer">AI Interview Platform · This is an automated message, please do not reply.</div>
+  </div>
+</body>
+</html>

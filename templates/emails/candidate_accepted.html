@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: 'Inter', Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b; padding: 40px 0; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); overflow: hidden; }
+        .header { background-color: #4f46e5; color: white; padding: 30px 40px; text-align: center; }
+        .header h1 { margin: 0; font-size: 24px; font-weight: 700; }
+        .content { padding: 40px; line-height: 1.6; }
+        .content p { margin: 0 0 16px 0; font-size: 16px; }
+        .highlight { font-weight: 600; color: #4f46e5; }
+        .footer { background-color: #f1f5f9; padding: 20px 40px; text-align: center; font-size: 14px; color: #64748b; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Congratulations! 🎉</h1>
+        </div>
+        <div class="content">
+            <p>Hi {{ name }},</p>
+            <p>We are thrilled to inform you that you have been <strong>selected for the next round</strong> for the <span class="highlight">{{ job_title }}</span> position!</p>
+            <p>Our team was very impressed with your background and the skills you demonstrated during the AI screening phase. We believe your experience aligns wonderfully with what we are looking for.</p>
+            <p>Our recruiting team will reach out to you shortly to coordinate the next steps and schedule your next interview.</p>
+            <p>Congratulations once again, and we look forward to speaking with you soon!</p>
+            <p><br>Best regards,<br>The Recruiting Team</p>
+        </div>
+        <div class="footer">
+            <p>&copy; 2026 AI Interview Platform. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>
