@@ -1,8 +1,14 @@
 """
 STT WebSocket Consumer
-Supports: deepgram (streaming), gemini (live), faster-whisper (local), transformers (local)
+Supports: deepgram (streaming), gemini-live (bidi WebSocket), gemini-transcribe (REST),
+          faster-whisper (local), transformers (local)
 
 Route: ws/stt/<session_token>/?token=<jwt_access_token>
+
+Gemini model routing
+--------------------
+  models/gemini-*-live  → bidiGenerateContent WebSocket  (existing, unchanged)
+  models/gemini-*       → REST generateContent            (audio buffered, sent on finalize)
 """
 
 import json
@@ -43,6 +49,11 @@ STT_MODEL_SIZE = config("STT_MODEL_SIZE", default="medium")
 HF_MODEL_ID = config("HF_MODEL_ID", default="openai/whisper-medium")
 DEEPGRAM_API_KEY = config("DEEPGRAM_API", default="")
 GEMINI_STT_MODEL = config("GEMINI_STT_MODEL", default="models/gemini-3.5-transcribe-live")
+
+# Detect which Gemini sub-mode to use:
+#   True  → bidiGenerateContent WebSocket (models ending with "-live")
+#   False → REST generateContent          (e.g. models/gemini-3.5-transcribe)
+_GEMINI_IS_LIVE = GEMINI_STT_MODEL.endswith("-live")
 
 _stt_model_fw = None
 _stt_model_hf = None
@@ -97,6 +108,10 @@ class STTConsumer(AsyncWebsocketConsumer):
         self.gemini_ready = False          # True once setupComplete received
         self.gemini_pre_buffer = []        # audio msgs buffered before setup done
 
+        # ── Gemini REST state (models/gemini-*-transcribe, non-live) ─────────
+        # Audio is accumulated in self.audio_buffer (already initialised above)
+        # and sent as a single REST call on finalize — no extra buffer needed.
+
         await self.accept()
         print(f"[STT] Connected: {user.email} | engine={STT_ENGINE}")
 
@@ -105,9 +120,15 @@ class STTConsumer(AsyncWebsocketConsumer):
             # Run as background task — audio arriving before DG connects is buffered
             asyncio.create_task(self._connect_deepgram())
         elif STT_ENGINE == "gemini":
-            # Run setup as a background task so connect() returns immediately.
-            # Audio arriving during setup is buffered and flushed once ready.
-            asyncio.create_task(self._connect_gemini())
+            if _GEMINI_IS_LIVE:
+                # Live bidi WebSocket model — run setup as a background task so
+                # connect() returns immediately. Audio arriving during setup is
+                # buffered and flushed once ready.
+                asyncio.create_task(self._connect_gemini())
+            else:
+                # REST transcription model — no persistent connection needed.
+                # Audio accumulates in self.audio_buffer; REST call fires on finalize.
+                print(f"[STT] Gemini REST mode — model={GEMINI_STT_MODEL} (audio buffered until finalize)")
 
     # ── Engine connection helpers ─────────────────────────────────────────────
 
@@ -388,26 +409,29 @@ class STTConsumer(AsyncWebsocketConsumer):
                     except Exception as e:
                         print(f"[STT] Deepgram audio send failed: {e}")
 
-            elif STT_ENGINE == "gemini" and self.gemini_ws:
-                pcm_int16 = np.clip(chunk, -1.0, 1.0)
-                pcm_int16 = (pcm_int16 * 32767).astype(np.int16)
-                b64 = base64.b64encode(pcm_int16.tobytes()).decode("utf-8")
-                msg = json.dumps({
-                    "realtimeInput": {
-                        "mediaChunks": [{
-                            "mimeType": "audio/pcm;rate=16000",
-                            "data": b64
-                        }]
-                    }
-                })
-                if not self.gemini_ready:
-                    # Gemini setup still in progress — buffer for later
-                    self.gemini_pre_buffer.append(msg)
-                else:
-                    try:
-                        await self.gemini_ws.send(msg)
-                    except Exception as e:
-                        print(f"[STT] Gemini audio send failed: {e}")
+            elif STT_ENGINE == "gemini":
+                if _GEMINI_IS_LIVE and self.gemini_ws:
+                    # ── Live bidi WebSocket model ─────────────────────────────
+                    pcm_int16 = np.clip(chunk, -1.0, 1.0)
+                    pcm_int16 = (pcm_int16 * 32767).astype(np.int16)
+                    b64 = base64.b64encode(pcm_int16.tobytes()).decode("utf-8")
+                    msg = json.dumps({
+                        "realtimeInput": {
+                            "mediaChunks": [{
+                                "mimeType": "audio/pcm;rate=16000",
+                                "data": b64
+                            }]
+                        }
+                    })
+                    if not self.gemini_ready:
+                        # Gemini setup still in progress — buffer for later
+                        self.gemini_pre_buffer.append(msg)
+                    else:
+                        try:
+                            await self.gemini_ws.send(msg)
+                        except Exception as e:
+                            print(f"[STT] Gemini audio send failed: {e}")
+                # else: REST model — audio is already accumulated in self.audio_buffer
 
         # ── Text: control messages ────────────────────────────────────────────
         elif text_data:
@@ -444,38 +468,47 @@ class STTConsumer(AsyncWebsocketConsumer):
                 self.dg_transcript = ""
                 self.dg_current = ""
 
-            elif STT_ENGINE == "gemini" and self.gemini_ws:
-                # With automaticActivityDetection, the server VAD may have already
-                # detected silence and set gemini_turn_done BEFORE the frontend
-                # sent 'finalize'. We must NOT blindly call .clear() first or we
-                # wipe the event that already fired — causing a 10s timeout.
-                #
-                # Strategy:
-                #   1. If already done (VAD fired) — use the text immediately.
-                #   2. If not done yet — send turnComplete to nudge Gemini, then wait.
+            elif STT_ENGINE == "gemini":
+                if _GEMINI_IS_LIVE and self.gemini_ws:
+                    # ── Live bidi WebSocket model ─────────────────────────────
+                    # With automaticActivityDetection, the server VAD may have
+                    # already detected silence and set gemini_turn_done BEFORE
+                    # the frontend sent 'finalize'. We must NOT blindly call
+                    # .clear() first or we wipe the event that already fired —
+                    # causing a 10s timeout.
+                    #
+                    # Strategy:
+                    #   1. If already done (VAD fired) — use the text immediately.
+                    #   2. If not done yet — send turnComplete to nudge Gemini,
+                    #      then wait.
 
-                if self.gemini_turn_done.is_set():
-                    # VAD already finished, transcript is ready right now
-                    print("[STT] Gemini VAD already done — using accumulated text")
-                else:
-                    # VAD hasn't finished yet. Nudge Gemini with explicit turnComplete
-                    # and wait up to 12s for the server to finish processing.
-                    try:
-                        await self.gemini_ws.send(json.dumps({
-                            "clientContent": {"turnComplete": True}
-                        }))
-                    except Exception as e:
-                        print(f"[STT] Gemini turnComplete signal failed: {e}")
+                    if self.gemini_turn_done.is_set():
+                        # VAD already finished, transcript is ready right now
+                        print("[STT] Gemini VAD already done — using accumulated text")
+                    else:
+                        # VAD hasn't finished yet. Nudge Gemini with explicit
+                        # turnComplete and wait up to 12s for the server to finish.
+                        try:
+                            await self.gemini_ws.send(json.dumps({
+                                "clientContent": {"turnComplete": True}
+                            }))
+                        except Exception as e:
+                            print(f"[STT] Gemini turnComplete signal failed: {e}")
 
-                    try:
-                        await asyncio.wait_for(self.gemini_turn_done.wait(), timeout=12.0)
-                    except asyncio.TimeoutError:
-                        print("[STT] Gemini response timed out — using partial text")
+                        try:
+                            await asyncio.wait_for(self.gemini_turn_done.wait(), timeout=12.0)
+                        except asyncio.TimeoutError:
+                            print("[STT] Gemini response timed out — using partial text")
 
-                transcript = self.gemini_transcript.strip()
-                # Reset state for the next turn
-                self.gemini_transcript = ""
-                self.gemini_turn_done.clear()
+                    transcript = self.gemini_transcript.strip()
+                    # Reset state for the next turn
+                    self.gemini_transcript = ""
+                    self.gemini_turn_done.clear()
+
+                elif not _GEMINI_IS_LIVE:
+                    # ── REST transcription model (e.g. models/gemini-3.5-transcribe) ──
+                    transcript = await self._transcribe_gemini_rest()
+                    self.gemini_transcript = ""
 
             else:
                 # Local Whisper (faster-whisper / transformers)
@@ -496,6 +529,103 @@ class STTConsumer(AsyncWebsocketConsumer):
             "text": final_text,
             "is_final": True,
         }))
+
+    # ── Gemini REST transcription (models/gemini-*-transcribe) ─────────────────
+
+    async def _transcribe_gemini_rest(self):
+        """
+        Transcribe self.audio_buffer using the Gemini REST generateContent API.
+        Used for non-live models such as models/gemini-3.5-transcribe.
+
+        The audio is encoded as a WAV file in memory, base64-encoded, and sent
+        as an inline blob part.  The model returns the transcription text.
+        """
+        try:
+            import urllib.request
+            import urllib.error
+
+            if len(self.audio_buffer) == 0:
+                return ""
+
+            GEMINI_API_KEY = config("GEMINI_API_KEY", default="")
+            if not GEMINI_API_KEY:
+                print("[STT] GEMINI_API_KEY is not set in .env")
+                return ""
+
+            # ── Build WAV bytes from the accumulated PCM buffer ───────────────
+            wav_io = BytesIO()
+            audio_int16 = (np.clip(self.audio_buffer, -1.0, 1.0) * 32767).astype(np.int16)
+            with wave.open(wav_io, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(audio_int16.tobytes())
+            wav_bytes = wav_io.getvalue()
+            audio_b64 = base64.b64encode(wav_bytes).decode("utf-8")
+
+            print(f"[STT] Gemini REST transcribe — model={GEMINI_STT_MODEL}, audio={len(wav_bytes)} bytes")
+
+            # ── Build REST request ────────────────────────────────────────────
+            # models/gemini-*-transcribe is a dedicated STT model.
+            # DO NOT include a text instruction part — the model only expects audio.
+            # responseModalities must be set to ["TEXT"] so the response carries text.
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/"
+                f"{GEMINI_STT_MODEL}:generateContent?key={GEMINI_API_KEY}"
+            )
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {
+                            "inlineData": {
+                                "mimeType": "audio/wav",
+                                "data": audio_b64
+                            }
+                        }
+                    ]
+                }],
+                "generationConfig": {
+                    "responseModalities": ["TEXT"]
+                }
+            }
+            body = json.dumps(payload).encode("utf-8")
+
+            # ── Fire the request in a thread (blocking I/O) ───────────────────
+            def _do_request():
+                req = urllib.request.Request(
+                    url,
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+
+            result = await asyncio.to_thread(_do_request)
+
+            # ── Extract transcript text ───────────────────────────────────────
+            candidates = result.get("candidates", [])
+            if not candidates:
+                print(f"[STT] Gemini REST: no candidates — full response: {result}")
+                return ""
+
+            parts = candidates[0].get("content", {}).get("parts", [])
+            text_parts = []
+            for p in parts:
+                if "audioTranscription" in p:
+                    text_parts.append(p["audioTranscription"].get("text", ""))
+                else:
+                    text_parts.append(p.get("text", ""))
+            text = " ".join(text_parts).strip()
+            if not text:
+                print(f"[STT] Gemini REST: empty text — full response: {result}")
+            else:
+                print(f"[STT] Gemini REST transcript: {text!r}")
+            return text
+
+        except Exception as e:
+            print(f"[STT] Gemini REST transcription error: {e}")
+            return ""
 
     # ── Local Whisper transcription ───────────────────────────────────────────
 
@@ -605,10 +735,15 @@ class STTConsumer(AsyncWebsocketConsumer):
                 "DEBUG: Deepgram WS not connected. Check DEEPGRAM_API key."
             )
         if STT_ENGINE == "gemini":
+            if not _GEMINI_IS_LIVE:
+                # REST model — gemini_ws is intentionally None (no WebSocket used).
+                # An empty result means the audio was silent or the API returned nothing.
+                return "candidate did not respond"
+            # Live bidi WebSocket model
             return (
                 "DEBUG: Gemini connected but received empty transcript."
                 if self.gemini_ws else
-                "DEBUG: Gemini WS not connected. Check GEMINI_API_KEY."
+                "DEBUG: Gemini Live WS not connected. Check GEMINI_API_KEY."
             )
         return "candidate did not respond"
 
