@@ -17,3 +17,5 @@ DATABASES = {
 
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='https://dwani.gradarena.in').split(',')
+# Add this line at the very bottom
+CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='https://dwani.gradarena.in,https://dwanibackend.gradarena.in').split(',')
