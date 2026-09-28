@@ -120,49 +120,11 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-# AWS S3 Configuration
-AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='')
-AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
-AWS_STORAGE_BUCKET_NAME = config('AWS_S3_BUCKET_NAME', default='')
-AWS_S3_REGION_NAME = config('AWS_S3_REGION', default='ap-south-1')
-AWS_S3_ENDPOINT_URL = config('AWS_S3_ENDPOINT_URL', default=None)
 
-if AWS_S3_ENDPOINT_URL:
-    AWS_S3_CUSTOM_DOMAIN = None
-else:
-    AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
 
-try:
-    HAS_STORAGES = True
-except ImportError:
-    HAS_STORAGES = False
 
-if AWS_ACCESS_KEY_ID and HAS_STORAGES:
-    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
-    AWS_S3_FILE_OVERWRITE = False
-    if AWS_S3_ENDPOINT_URL:
-        AWS_DEFAULT_ACL = None
-    else:
-        AWS_DEFAULT_ACL = 'private'
-else:
-    DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
 
-# Email Configuration
-EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
-EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
-EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
-EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
-DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@aiinterview.com')
-
-# Frontend Configuration
-FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
-SESSION_LINK_EXPIRY_HOURS = config('SESSION_LINK_EXPIRY_HOURS', default=24, cast=int)
-
-# Supabase Configuration
-SUPABASE_URL = config('SUPABASE_URL', default='')
-SUPABASE_KEY = config('SUPABASE_KEY', default='')
+SESSION_LINK_EXPIRY_HOURS = config('SESSION_LINK_EXPIRY_HOURS', default=48, cast=int)
 
 # CORS origin settings are defined in development.py and production.py
 CORS_ALLOW_CREDENTIALS = True
