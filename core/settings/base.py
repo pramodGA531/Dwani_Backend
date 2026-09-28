@@ -12,7 +12,7 @@ import dj_database_url
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Read .env from the root project directory automatically
-config = AutoConfig(search_path=str(BASE_DIR.parent))
+config = AutoConfig(search_path=str(BASE_DIR))
 
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-default-key')
 
