@@ -5,3 +5,6 @@ tests
 debug_audio.wav
 .env.*
 migrations
+__pycache__/
+*.pyc
+*.pyo
