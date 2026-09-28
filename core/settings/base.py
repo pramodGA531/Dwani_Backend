@@ -15,10 +15,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 config = AutoConfig(search_path=str(BASE_DIR.parent))
 
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-default-key')
-DEBUG = config('DEBUG', default=True, cast=bool)
 
-# ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,192.168.0.114').split(',')
-ALLOWED_HOSTS = ["*"]
+# Environment-specific settings (DEBUG, ALLOWED_HOSTS) are defined in 
+# development.py and production.py
 INSTALLED_APPS = [
     'daphne',
     'channels',
@@ -70,12 +69,7 @@ TEMPLATES = [
 WSGI_APPLICATION = 'core.wsgi.application'
 ASGI_APPLICATION = 'core.asgi.application'
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
-}
+# DATABASES configuration is defined in development.py and production.py
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -92,10 +86,10 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
-USE_I18N = True
-USE_TZ = True
+LANGUAGE_CODE = config('LANGUAGE_CODE', default='en-us')
+TIME_ZONE = config('TIME_ZONE', default='UTC')
+USE_I18N = config('USE_I18N', default=True, cast=bool)
+USE_TZ = config('USE_TZ', default=True, cast=bool)
 
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
@@ -139,7 +133,6 @@ else:
     AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
 
 try:
-    import storages
     HAS_STORAGES = True
 except ImportError:
     HAS_STORAGES = False
@@ -155,7 +148,7 @@ else:
     DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
 
 # Email Configuration
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
 EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
 EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
 EMAIL_USE_TLS = True
@@ -164,14 +157,14 @@ EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@aiinterview.com')
 
 # Frontend Configuration
-FRONTEND_URL = 'http://192.168.0.114:5173' # config('FRONTEND_URL', default='http://localhost:5173')
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
 SESSION_LINK_EXPIRY_HOURS = config('SESSION_LINK_EXPIRY_HOURS', default=24, cast=int)
 
 # Supabase Configuration
 SUPABASE_URL = config('SUPABASE_URL', default='')
 SUPABASE_KEY = config('SUPABASE_KEY', default='')
 
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS origin settings are defined in development.py and production.py
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
     "accept",
@@ -182,7 +175,7 @@ CORS_ALLOW_HEADERS = [
     "x-requested-with",
 ]
 
-REDIS_URL = '' # config('REDIS_URL', default='')
+REDIS_URL = config('REDIS_URL', default='')
 
 if REDIS_URL:
     # Production: use Redis channel layer

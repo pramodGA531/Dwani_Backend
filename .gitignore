@@ -3,5 +3,5 @@ db.sqlite3
 media
 tests
 debug_audio.wav
-
+.env.*
 migrations
