@@ -79,6 +79,7 @@ class AnomalyLog(models.Model):
     event_type   = models.CharField(max_length=100)
     severity     = models.CharField(max_length=20, choices=SEVERITY_CHOICES, default='low')
     snapshot_url = models.URLField(max_length=500, blank=True)
+    screen_snapshot_url = models.URLField(max_length=500, blank=True)
     timestamp    = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

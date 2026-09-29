@@ -932,15 +932,24 @@ class ReportsView(APIView):
         if pk:
             try:
                 try:
+                    # First try to fetch by UUID (Report's native uuid)
                     report = Report.objects.select_related('interview', 'interview__job', 'interview__candidate').get(
-                        interview_id=pk, 
+                        uuid=pk, 
                         interview__job__recruiter=user
                     )
-                except (Report.DoesNotExist, ValueError):
-                    report = Report.objects.select_related('interview', 'interview__job', 'interview__candidate').get(
-                        id=pk, 
-                        interview__job__recruiter=user
-                    )
+                except Report.DoesNotExist:
+                    try:
+                        # Fallback to interview ID
+                        report = Report.objects.select_related('interview', 'interview__job', 'interview__candidate').get(
+                            interview_id=pk, 
+                            interview__job__recruiter=user
+                        )
+                    except (Report.DoesNotExist, ValueError):
+                        # Fallback to report ID
+                        report = Report.objects.select_related('interview', 'interview__job', 'interview__candidate').get(
+                            id=pk, 
+                            interview__job__recruiter=user
+                        )
                 
                 responses = InterviewResponse.objects.filter(interview=report.interview).order_by('question_index')
                 
@@ -1001,6 +1010,21 @@ class ReportsView(APIView):
                 except:
                     candidate_feedback = None
 
+                try:
+                    from ai_engine.models import AnomalyLog
+                    anomalies = AnomalyLog.objects.filter(interview=report.interview).order_by('-timestamp')
+                    anomalies_data = [
+                        {
+                            "event_type": a.event_type,
+                            "severity": a.severity,
+                            "snapshot_url": a.snapshot_url,
+                            "screen_snapshot_url": a.screen_snapshot_url,
+                            "timestamp": a.timestamp.strftime('%H:%M:%S')
+                        } for a in anomalies
+                    ]
+                except Exception:
+                    anomalies_data = []
+
                 return Response({
                     "id": str(report.interview.id),
                     "candidate_name": report.interview.candidate_name or report.interview.candidate.email,
@@ -1017,6 +1041,7 @@ class ReportsView(APIView):
                     "scores": scores_dict,
                     "pdf_url": report.pdf_s3_url,
                     "candidate_feedback": candidate_feedback,
+                    "anomalies": anomalies_data,
                     "created_at": report.created_at.strftime('%Y-%m-%d')
                 }, status=status.HTTP_200_OK)
             except Report.DoesNotExist:
@@ -1079,7 +1104,8 @@ class ReportsView(APIView):
                 cost_inr = round(((total_reasoning_tokens * 0.0000007) + (total_stt_seconds * 0.0001)) * usd_to_inr_rate, 2)
                 
                 reports_list.append({
-                    "id": str(r.interview.id),
+                    "id": str(r.id),
+                    "uuid": str(r.uuid),
                     "name": r.interview.candidate_name or r.interview.candidate.email,
                     "email": r.interview.candidate.email,
                     "profile_picture": getattr(r.interview.candidate.candidate_profile, 'profile_picture', None) if hasattr(r.interview.candidate, 'candidate_profile') else None,

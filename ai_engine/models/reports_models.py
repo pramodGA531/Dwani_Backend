@@ -1,7 +1,10 @@
 from django.db import models
 from ai_engine.models import Interview
 
+import uuid
+
 class Report(models.Model):
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     interview = models.OneToOneField(Interview, on_delete=models.CASCADE, related_name='report')
     
     overall_score = models.FloatField(null=True, blank=True)
