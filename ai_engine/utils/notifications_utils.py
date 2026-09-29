@@ -3,13 +3,30 @@ from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.conf import settings
 
-def send_html_email(subject, template_name, context, recipient_list):
+def send_html_email(subject, template_name, context, recipient_list, plain_text=None):
     html_content = render_to_string(template_name, context)
+
+    # Build a meaningful plain-text fallback if not provided
+    if not plain_text:
+        invite_link = context.get('invite_link') or context.get('login_url', '')
+        plain_text = (
+            f"{subject}\n\n"
+            f"Hello {context.get('email') or context.get('name', 'there')},\n\n"
+            f"{context.get('job_title', '')}\n\n"
+            + (f"Interview link: {invite_link}\n\n" if invite_link else "")
+            + "This is a transactional email from DwaniAI Hiring Platform.\n"
+            "Please do not reply to this email.\n"
+        )
+
     email = EmailMultiAlternatives(
         subject=subject,
-        body="Please view this email in an HTML compatible client.",
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        to=recipient_list
+        body=plain_text,
+        from_email=f"DwaniAI Hiring <{settings.DEFAULT_FROM_EMAIL}>",
+        to=recipient_list,
+        headers={
+            "List-Unsubscribe": f"<mailto:{settings.DEFAULT_FROM_EMAIL}?subject=unsubscribe>",
+            "X-Mailer": "DwaniAI Hiring Platform",
+        }
     )
     email.attach_alternative(html_content, "text/html")
 
