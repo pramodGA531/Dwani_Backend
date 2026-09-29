@@ -4,47 +4,16 @@ from django.template.loader import render_to_string
 from django.conf import settings
 
 def send_html_email(subject, template_name, context, recipient_list, plain_text=None):
-    html_content = render_to_string(template_name, context)
-
-    # Build a meaningful plain-text fallback if not provided
-    if not plain_text:
-        invite_link = context.get('invite_link') or context.get('login_url', '')
-        plain_text = (
-            f"{subject}\n\n"
-            f"Hello {context.get('email') or context.get('name', 'there')},\n\n"
-            f"{context.get('job_title', '')}\n\n"
-            + (f"Interview link: {invite_link}\n\n" if invite_link else "")
-            + "This is a transactional email from DwaniAI Hiring Platform.\n"
-            "Please do not reply to this email.\n"
-        )
-
-    email = EmailMultiAlternatives(
+    from ai_engine.tasks import send_email_task
+    
+    # Fire off to Celery in the background
+    send_email_task.delay(
         subject=subject,
-        body=plain_text,
-        from_email=f"DwaniAI Hiring <{settings.DEFAULT_FROM_EMAIL}>",
-        to=recipient_list,
-        headers={
-            "List-Unsubscribe": f"<mailto:{settings.DEFAULT_FROM_EMAIL}?subject=unsubscribe>",
-            "X-Mailer": "DwaniAI Hiring Platform",
-        }
+        template_name=template_name,
+        context=context,
+        recipient_list=recipient_list,
+        plain_text=plain_text
     )
-    email.attach_alternative(html_content, "text/html")
-
-    # Always print credentials to server log as a fallback
-    if 'temp_password' in context and context['temp_password']:
-        print(f"\n{'='*60}")
-        print(f"[EMAIL DEBUG] Sending invite to: {recipient_list}")
-        print(f"[EMAIL DEBUG] Subject: {subject}")
-        print(f"[EMAIL DEBUG] Candidate Email: {context.get('email')}")
-        print(f"[EMAIL DEBUG] Temp Password:   {context['temp_password']}")
-        print(f"[EMAIL DEBUG] Invite Link:     {context.get('invite_link', 'N/A')}")
-        print(f"{'='*60}\n")
-
-    try:
-        email.send()
-        print(f"[EMAIL] Successfully sent '{subject}' to {recipient_list}")
-    except Exception as e:
-        print(f"[EMAIL ERROR] Failed to send '{subject}' to {recipient_list}: {e}")
 
 def send_approval_email(user):
     """Send approval email to a recruiter whose account has been approved."""

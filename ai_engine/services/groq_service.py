@@ -21,12 +21,24 @@ class GroqAIService:
         """Call Groq and parse the response as JSON."""
         response = self.client.chat.completions.create(
             model=self.model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": "You must output strictly valid JSON. Do not include any text outside the JSON object. Do not include markdown formatting like ```json."},
+                {"role": "user", "content": prompt}
+            ],
             temperature=0.3,
-            response_format={"type": "json_object"},
+            # Removed response_format to avoid strict 400 errors from Groq API if the model hallucinated syntax
         )
-        raw = response.choices[0].message.content
-        return json.loads(raw)
+        raw = response.choices[0].message.content.strip()
+        
+        # Clean up common markdown formatting if the LLM ignored instructions
+        if raw.startswith("```json"):
+            raw = raw[7:]
+        elif raw.startswith("```"):
+            raw = raw[3:]
+        if raw.endswith("```"):
+            raw = raw[:-3]
+            
+        return json.loads(raw.strip())
 
     def _chat_text(self, prompt: str, temperature: float = 0.6) -> str:
         """Call Groq and return plain text."""
@@ -71,6 +83,7 @@ Return ONLY a valid JSON object with this structure:
     "candidate_details": {{
         "name": "Candidate Full Name",
         "email": "Candidate Email",
+        "ats_score": 85,
         "skills": ["Skill1", "Skill2"],
         "highlights": ["Highlight 1", "Highlight 2"],
         "experience": [

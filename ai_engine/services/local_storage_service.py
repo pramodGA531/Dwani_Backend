@@ -31,6 +31,7 @@ class LocalStorageService:
             recruiter_id=data.get("recruiter_id"),
             jd_url=data.get("jd_url"),
             resume_url=data.get("resume_url"),
+            ats_score=data.get("ats_score"),
             status=data.get("status", "pending")
         )
         return {"id": screening.id}

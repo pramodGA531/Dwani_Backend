@@ -108,6 +108,7 @@ class Screening(models.Model):
     jd_url = models.URLField(max_length=1000, blank=True, null=True)
     resume_url = models.URLField(max_length=1000, blank=True, null=True)
     report_url = models.URLField(max_length=1000, blank=True, null=True)
+    ats_score = models.IntegerField(null=True, blank=True)
     status = models.CharField(max_length=50, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
 

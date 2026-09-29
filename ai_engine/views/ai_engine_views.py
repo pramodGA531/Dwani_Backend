@@ -57,6 +57,7 @@ class ScreeningProcessView(APIView):
             metadata = {
                 "candidate_name":  candidate_info.get('name', candidate_name),
                 "candidate_email": candidate_info.get('email', candidate_email),
+                "ats_score":       candidate_info.get('ats_score', 0),
                 "recruiter_id":    str(request.user.id),   # normalised: store ID not email
                 "jd_url":          jd_url,
                 "resume_url":      resume_url
