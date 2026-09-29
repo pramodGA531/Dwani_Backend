@@ -59,9 +59,24 @@ class DocumentExtractor:
     def _extract_from_docx(file_stream):
         text = ""
         try:
-            doc = Document(file_stream)
+            import io
+            if hasattr(file_stream, 'read'):
+                file_stream.seek(0)
+                content = file_stream.read()
+                stream_to_parse = io.BytesIO(content)
+            else:
+                stream_to_parse = file_stream
+                
+            doc = Document(stream_to_parse)
             for para in doc.paragraphs:
                 text += para.text + "\n"
+            
+            # Also extract text from tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        text += cell.text + " "
+                    text += "\n"
         except Exception as e:
             print(f"Error extracting DOCX: {e}")
         return text.strip()

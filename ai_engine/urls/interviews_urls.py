@@ -4,7 +4,7 @@ from ai_engine.views.interviews_views import (
     InviteCandidateView, ValidateSessionView, InterviewViewSet, 
     StartInterviewView, SubmitAnswerView, GetResultsView, SubmitReviewView,
     DashboardStatsView, ReportsView, LiveMonitoringDetailView, CandidateDeleteView,
-    AnomalyLogView, AbandonSessionView
+    AnomalyLogView, AbandonSessionView, LiveSessionsView, PipelineStatsView, UploadSnapshotView
 )
 
 router = DefaultRouter()
@@ -12,6 +12,7 @@ router.register(r'interviews', InterviewViewSet, basename='interview')
 
 urlpatterns = [
     path('candidate/', CandidateDeleteView.as_view(), name='delete_candidate'),
+    path('pipeline-stats/', PipelineStatsView.as_view(), name='pipeline_stats'),
     path('', include(router.urls)),
     path('invite/', InviteCandidateView.as_view(), name='invite_candidate'),
     path('validate-session/<str:token>/', ValidateSessionView.as_view(), name='validate_session'),
@@ -25,4 +26,6 @@ urlpatterns = [
     path('live-monitoring/<str:session_token>/', LiveMonitoringDetailView.as_view(), name='live_monitoring_detail'),
     path('anomaly/', AnomalyLogView.as_view(), name='log_anomaly'),
     path('abandon-session/', AbandonSessionView.as_view(), name='abandon_session'),
+    path('live-sessions/', LiveSessionsView.as_view(), name='live_sessions_list'),
+    path('upload-snapshot/', UploadSnapshotView.as_view(), name='upload_snapshot'),
 ]

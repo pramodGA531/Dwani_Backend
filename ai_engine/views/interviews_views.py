@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from datetime import timedelta
+from datetime import timedelta, datetime
 from ai_engine.models import Job
 from ai_engine.models import Interview
 from ai_engine.utils.notifications_utils import send_html_email
@@ -13,10 +13,32 @@ from ai_engine.models import Notification
 import uuid
 import secrets
 import string
+import requests
+from django.core.cache import cache
 from django.conf import settings
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from rest_framework_simplejwt.tokens import RefreshToken
+
+from rest_framework.pagination import PageNumberPagination
+
+class StandardResultsSetPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+def get_usd_to_inr_rate():
+    rate = cache.get('usd_to_inr_rate')
+    if rate is None:
+        try:
+            response = requests.get('https://api.exchangerate-api.com/v4/latest/USD', timeout=5)
+            data = response.json()
+            rate = data.get('rates', {}).get('INR', 96.0)
+            cache.set('usd_to_inr_rate', rate, 60*60*12)
+        except Exception as e:
+            print(f"Failed to fetch live exchange rate: {e}")
+            rate = 96.0
+    return rate
 
 User = get_user_model()
 
@@ -74,6 +96,8 @@ class InviteCandidateView(APIView):
         skills = request.data.get('skills', [])
         highlights = request.data.get('highlights', [])
         question_count = int(request.data.get('questionCount', 5))
+        start_date = request.data.get('start_date')
+        start_time = request.data.get('start_time')
 
         interview = Interview.objects.create(
             job=job,
@@ -83,10 +107,12 @@ class InviteCandidateView(APIView):
             link2=tracking_link,
             link1_expiry=timezone.now() + timedelta(hours=settings.SESSION_LINK_EXPIRY_HOURS),
             resume_text=resume_text,
-            ats_score=ats_score,
             skills=skills,
             highlights=highlights,
-            num_questions=question_count
+            num_questions=question_count,
+            start_date=start_date,
+            start_time=start_time,
+            ats_score=ats_score
         )
 
         # Store candidate name in the normalised CandidateProfile table
@@ -210,9 +236,24 @@ class ValidateSessionView(APIView):
         try:
             interview = Interview.objects.get(session_token=token)
             
-            # Check Expiry
-            if interview.link1_expiry and interview.link1_expiry < timezone.now():
-                return Response({"error": "Session link has expired"}, status=status.HTTP_403_FORBIDDEN)
+            # Check Expiry & Start Window
+            if interview.start_date and interview.start_time:
+                from datetime import timezone as dt_timezone, timedelta
+                # IST is UTC+5:30
+                tz = dt_timezone(timedelta(hours=5, minutes=30))
+                start_dt = datetime.combine(interview.start_date, interview.start_time).replace(tzinfo=tz)
+                now = timezone.now()
+                
+                if now < start_dt:
+                    formatted_dt = start_dt.strftime('%B %d, %Y at %I:%M %p')
+                    return Response({"error": f"This interview is scheduled for {formatted_dt}. Please use the link at the scheduled time."}, status=status.HTTP_403_FORBIDDEN)
+                
+                if now > start_dt + timedelta(hours=24):
+                    return Response({"error": "This interview link has expired. The 24-hour window has passed."}, status=status.HTTP_403_FORBIDDEN)
+            else:
+                # Fallback to old expiry logic if start_date/time not used
+                if interview.link1_expiry and interview.link1_expiry < timezone.now():
+                    return Response({"error": "Session link has expired"}, status=status.HTTP_403_FORBIDDEN)
             
             # Block retests for completed or malpractice/terminated sessions
             if interview.status in ['completed', 'malpractice', 'shortlisted', 'rejected']:
@@ -650,12 +691,19 @@ class GetResultsView(APIView):
             "skills": interview.skills,
             "highlights": interview.highlights,
             "created_at": interview.created_at,
+            "ats_score": interview.ats_score,
             "responses": qa_list,
             **report_data,
         }, status=status.HTTP_200_OK)
 
 
 from rest_framework import viewsets, serializers
+from rest_framework.pagination import PageNumberPagination
+
+class StandardResultsSetPagination(PageNumberPagination):
+    page_size = 4
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 
 class InterviewSerializer(serializers.ModelSerializer):
     id = serializers.CharField(read_only=True)
@@ -669,21 +717,47 @@ class InterviewSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Interview
-        fields = ['id', 'job_title', 'candidate_email', 'candidate_name', 'status', 'ats_score', 'created_at', 'link1_expiry', 'skills', 'highlights', 'resume_text']
-        read_only_fields = ['id', 'job_title', 'candidate_email', 'candidate_name', 'ats_score', 'created_at', 'link1_expiry']
+        fields = ['id', 'job_title', 'candidate_email', 'candidate_name', 'status', 'created_at', 'link1_expiry', 'skills', 'highlights', 'resume_text', 'ats_score']
+        read_only_fields = ['id', 'job_title', 'candidate_email', 'candidate_name', 'created_at', 'link1_expiry']
 
 class InterviewViewSet(viewsets.ModelViewSet):
     serializer_class = InterviewSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
         user = self.request.user
+        qs = Interview.objects.none()
+        
         if user.role == 'recruiter':
-            return Interview.objects.filter(job__recruiter=user)
+            qs = Interview.objects.filter(job__recruiter=user)
         elif user.role == 'candidate':
-            return Interview.objects.filter(candidate=user)
-        return Interview.objects.none()
+            qs = Interview.objects.filter(candidate=user)
+            
+        pipeline_tab = self.request.query_params.get('pipeline_tab')
+        if pipeline_tab == 'scheduled_live':
+            qs = qs.filter(status__in=['pending', 'in_progress'])
+        elif pipeline_tab == 'completed':
+            qs = qs.filter(status='completed')
+        elif pipeline_tab == 'all':
+            qs = qs.exclude(status='rejected')
+            
+        return qs.order_by('-created_at')
 
+class PipelineStatsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        if user.role != 'recruiter':
+            return Response({"error": "Unauthorized"}, status=403)
+            
+        qs = Interview.objects.filter(job__recruiter=user)
+        return Response({
+            "all": qs.exclude(status='rejected').count(),
+            "scheduled_live": qs.filter(status__in=['pending', 'in_progress']).count(),
+            "completed": qs.filter(status='completed').count(),
+        })
 
 class SubmitReviewView(APIView):
     permission_classes = [AllowAny]
@@ -797,11 +871,51 @@ class DashboardStatsView(APIView):
                 "iconBg": icon_bg
             })
 
+        # Calculate AI Tokens & Estimated Cost (Assumption-based)
+        total_text_chars = 0
+        total_audio_chars = 0
+        
+        all_interviews = Interview.objects.filter(job__recruiter=user).prefetch_related('responses')
+        for inv in all_interviews:
+            if inv.resume_text:
+                total_text_chars += len(inv.resume_text)
+            if inv.job and inv.job.description:
+                total_text_chars += len(inv.job.description)
+                
+            for r in inv.responses.all():
+                if r.question_text:
+                    total_text_chars += len(r.question_text)
+                if r.answer_text:
+                    total_text_chars += len(r.answer_text)
+                    total_audio_chars += len(r.answer_text)
+                    
+        # Assumptions:
+        # 1 Token ≈ 4 characters
+        # 1 Second of STT audio ≈ 15 characters of transcribed text
+        # Llama 3 70B Cost ≈ $0.70 per 1M tokens = $0.0000007 per token
+        # Whisper STT Cost ≈ $0.006 per minute = $0.0001 per second
+        
+        usd_to_inr_rate = get_usd_to_inr_rate()
+        
+        total_reasoning_tokens = total_text_chars // 4
+        total_stt_seconds = total_audio_chars // 15
+        
+        cost_reasoning_usd = total_reasoning_tokens * 0.0000007
+        cost_stt_usd = total_stt_seconds * 0.0001
+        
+        total_cost_usd = cost_reasoning_usd + cost_stt_usd
+        total_cost_inr = round(total_cost_usd * usd_to_inr_rate, 2)
+
         return Response({
             "total_jobs": total_jobs,
             "total_candidates": total_candidates,
             "active_interviews": active_interviews,
-            "activities": activities
+            "activities": activities,
+            "ai_usage": {
+                "reasoning_tokens": total_reasoning_tokens,
+                "stt_seconds": total_stt_seconds,
+                "estimated_cost_inr": total_cost_inr
+            }
         }, status=status.HTTP_200_OK)
 
 
@@ -869,17 +983,31 @@ class ReportsView(APIView):
                 scores_dict = {
                     "technical": round(avg_accuracy),
                     "communication": round(avg_clarity),
-                    "confidence": round(avg_relevance),
-                    "problem_solving": round(avg_accuracy),
-                    "behavioral": round(avg_relevance)
+                    "problem_solving": round(avg_relevance)
                 }
+                
+                calculated_overall = round((avg_accuracy + avg_clarity + avg_relevance) / 3)
+                
+                try:
+                    from ai_engine.models import CandidateReview
+                    review = CandidateReview.objects.get(interview=report.interview)
+                    candidate_feedback = {
+                        "overall_experience": review.overall_experience,
+                        "ai_clarity": review.ai_clarity,
+                        "ease_of_use": review.ease_of_use,
+                        "technical_stability": review.technical_stability,
+                        "comment": review.comment
+                    }
+                except:
+                    candidate_feedback = None
 
                 return Response({
                     "id": str(report.interview.id),
                     "candidate_name": report.interview.candidate_name or report.interview.candidate.email,
                     "candidate_email": report.interview.candidate.email,
+                    "profile_picture": getattr(report.interview.candidate.candidate_profile, 'profile_picture', None) if hasattr(report.interview.candidate, 'candidate_profile') else None,
                     "job_title": report.interview.job.title,
-                    "overall_score": report.overall_score,
+                    "overall_score": calculated_overall,
                     "overall_summary": report.overall_summary,
                     "recommendation": report.recommendation,
                     "interview_status": report.interview.status,
@@ -888,19 +1016,33 @@ class ReportsView(APIView):
                     "transcript": transcript,
                     "scores": scores_dict,
                     "pdf_url": report.pdf_s3_url,
+                    "candidate_feedback": candidate_feedback,
                     "created_at": report.created_at.strftime('%Y-%m-%d')
                 }, status=status.HTTP_200_OK)
             except Report.DoesNotExist:
                 return Response({"error": "Report not found"}, status=status.HTTP_404_NOT_FOUND)
         
         else:
-            reports = Report.objects.select_related('interview', 'interview__job', 'interview__candidate').filter(
+            reports = Report.objects.select_related('interview', 'interview__job', 'interview__candidate').prefetch_related('interview__responses').filter(
                 interview__job__recruiter=user
             ).order_by('-created_at')
             
+            paginator = StandardResultsSetPagination()
+            paginated_reports = paginator.paginate_queryset(reports, request)
+            
             reports_list = []
-            for r in reports:
-                score = r.overall_score or 0
+            for r in paginated_reports:
+                # Calculate mathematical average instead of using AI overall score
+                responses = r.interview.responses.all()
+                total_resp = len(responses)
+                if total_resp > 0:
+                    avg_rel = sum(resp.relevance_score or 0 for resp in responses) / total_resp
+                    avg_acc = sum(resp.accuracy_score or 0 for resp in responses) / total_resp
+                    avg_cla = sum(resp.clarity_score or 0 for resp in responses) / total_resp
+                    score = round((avg_rel + avg_acc + avg_cla) / 3)
+                else:
+                    score = r.overall_score or 0
+
                 if score >= 85:
                     match_tier = "Expert Match"
                 elif score >= 70:
@@ -912,18 +1054,48 @@ class ReportsView(APIView):
 
                 status_val = "shortlisted" if r.interview.status == "shortlisted" else "rejected" if r.interview.status == "rejected" else (r.recommendation or "Maybe")
                 
+                total_text_chars = 0
+                total_audio_chars = 0
+                inv = r.interview
+                if inv.resume_text:
+                    total_text_chars += len(inv.resume_text)
+                if inv.job and inv.job.description:
+                    total_text_chars += len(inv.job.description)
+                
+                for resp in inv.responses.all():
+                    if resp.question_text:
+                        total_text_chars += len(resp.question_text)
+                    if resp.answer_text:
+                        total_text_chars += len(resp.answer_text)
+                        total_audio_chars += len(resp.answer_text)
+                
+                usd_to_inr_rate = get_usd_to_inr_rate()
+                
+                total_reasoning_tokens = total_text_chars // 4
+                total_stt_seconds = total_audio_chars // 15
+                
+                ai_cost_inr = round((total_reasoning_tokens * 0.0000007) * usd_to_inr_rate, 4)
+                stt_cost_inr = round((total_stt_seconds * 0.0001) * usd_to_inr_rate, 4)
+                cost_inr = round(((total_reasoning_tokens * 0.0000007) + (total_stt_seconds * 0.0001)) * usd_to_inr_rate, 2)
+                
                 reports_list.append({
                     "id": str(r.interview.id),
                     "name": r.interview.candidate_name or r.interview.candidate.email,
                     "email": r.interview.candidate.email,
+                    "profile_picture": getattr(r.interview.candidate.candidate_profile, 'profile_picture', None) if hasattr(r.interview.candidate, 'candidate_profile') else None,
                     "role": r.interview.job.title,
                     "score": score,
                     "match": match_tier,
                     "status": status_val,
+                    "ai_tokens": total_reasoning_tokens,
+                    "stt_seconds": total_stt_seconds,
+                    "ai_cost_inr_exact": ai_cost_inr,
+                    "stt_cost_inr_exact": stt_cost_inr,
+                    "total_cost_inr": cost_inr,
                     "created_at": r.created_at.strftime('%Y-%m-%d')
                 })
             
-            return Response(reports_list, status=status.HTTP_200_OK)
+            return paginator.get_paginated_response(reports_list)
 
     def post(self, request, pk):
         user = request.user
@@ -1016,9 +1188,7 @@ class LiveMonitoringDetailView(APIView):
             scores = {
                 "technical": round(avg_accuracy),
                 "communication": round(avg_clarity),
-                "confidence": round(avg_relevance),
-                "problem_solving": round(avg_accuracy),
-                "behavioral": round(avg_relevance)
+                "problem_solving": round(avg_relevance)
             }
 
             return Response({
@@ -1091,19 +1261,23 @@ class AnomalyLogView(APIView):
                 # Generate a report even if terminated due to malpractice
                 generate_interview_report(interview)
 
-            # Broadcast to recruiter
-            channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                f'interview_{interview.session_token}',
-                {
-                    'type': 'anomaly_event',
-                    'event_type': event_type,
-                    'severity': severity,
-                    'snapshot_url': snapshot_url,
-                    'timestamp': anomaly.timestamp.isoformat(),
-                    'is_termination': terminate
-                }
-            )
+            # Broadcast to recruiter via WebSocket (best-effort — won't crash if Redis unavailable)
+            try:
+                channel_layer = get_channel_layer()
+                if channel_layer:
+                    async_to_sync(channel_layer.group_send)(
+                        f'interview_{interview.session_token}',
+                        {
+                            'type': 'anomaly_event',
+                            'event_type': event_type,
+                            'severity': severity,
+                            'snapshot_url': snapshot_url,
+                            'timestamp': anomaly.timestamp.isoformat(),
+                            'is_termination': terminate
+                        }
+                    )
+            except Exception as ws_err:
+                print(f"[WS] Could not broadcast anomaly event (channel layer unavailable): {ws_err}")
 
             # Create In-App Notification: Proctoring Anomaly
             try:
@@ -1122,3 +1296,67 @@ class AnomalyLogView(APIView):
         except Exception as e:
             print(f"Error logging anomaly: {e}")
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class LiveSessionsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            from django.db.models import Q
+            search_query = request.GET.get('search', '').strip()
+            interviews = Interview.objects.filter(job__recruiter=request.user, status='in_progress')
+            
+            if search_query:
+                interviews = interviews.filter(
+                    Q(candidate__email__icontains=search_query) |
+                    Q(candidate_name__icontains=search_query) |
+                    Q(job__title__icontains=search_query)
+                )
+                
+            interviews = interviews.order_by('-created_at')
+            
+            paginator = StandardResultsSetPagination()
+            paginated_interviews = paginator.paginate_queryset(interviews, request)
+            
+            results = []
+            for interview in paginated_interviews:
+                # Safely get candidate name, falling back to candidate email
+                c_name = getattr(interview, 'candidate_name', None)
+                if not c_name and interview.candidate:
+                    c_name = getattr(interview.candidate, 'first_name', '') + ' ' + getattr(interview.candidate, 'last_name', '')
+                    c_name = c_name.strip() or interview.candidate.email
+
+                results.append({
+                    "id": interview.id,
+                    "candidate_name": c_name,
+                    "candidate_email": interview.candidate.email if interview.candidate else None,
+                    "profile_picture": getattr(interview.candidate.candidate_profile, 'profile_picture', None) if (interview.candidate and hasattr(interview.candidate, 'candidate_profile')) else None,
+                    "job_title": getattr(interview.job, 'title', 'N/A') if interview.job else 'N/A',
+                    "status": interview.status,
+                    "session_token": str(interview.session_token) if interview.session_token else None
+                })
+            return paginator.get_paginated_response(results)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class UploadSnapshotView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        token = request.data.get('token')
+        snapshot = request.data.get('snapshot')
+
+        if not token or not snapshot:
+            return Response({"error": "Missing token or snapshot"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            interview = Interview.objects.get(session_token=token)
+            profile = interview.candidate.candidate_profile
+            profile.profile_picture = snapshot
+            profile.save()
+            return Response({"status": "success"})
+        except Interview.DoesNotExist:
+            return Response({"error": "Invalid token"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+

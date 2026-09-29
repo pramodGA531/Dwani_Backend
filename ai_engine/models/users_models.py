@@ -103,6 +103,7 @@ class CandidateProfile(models.Model):
     phone       = models.BigIntegerField(null=True, blank=True)   # Stored as integer (no formatting noise)
     location    = models.CharField(max_length=255, blank=True)
     resume_text = models.TextField(blank=True, null=True)         # Optional cached resume text
+    profile_picture = models.TextField(blank=True, null=True)     # Base64 snapshot
     created_at  = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

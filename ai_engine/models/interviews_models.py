@@ -30,12 +30,15 @@ class Interview(models.Model):
 
     status       = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     resume_text  = models.TextField(blank=True, null=True)
-    ats_score    = models.FloatField(null=True, blank=True)
+
     question_bank = models.JSONField(default=list, blank=True)
     skills       = models.JSONField(default=list, blank=True)
     highlights   = models.JSONField(default=list, blank=True)
     num_questions = models.IntegerField(default=5)
+    start_date   = models.DateField(null=True, blank=True)
+    start_time   = models.TimeField(null=True, blank=True)
     created_at   = models.DateTimeField(auto_now_add=True)
+    ats_score    = models.IntegerField(null=True, blank=True)
 
     @property
     def candidate_name(self):
