@@ -134,17 +134,17 @@ Return ONLY a valid JSON object with this structure:
         safe_answer = answer_text[:6000] if answer_text else ""
 
         prompt = f"""
-You are a supportive, Senior-medium-strict technical interviewer. 
-Your goal is to evaluate the candidate's answer fairly, being lenient on minor grammatical errors, nervousness, or slight technical hesitations. Reward effort, partial correctness, and a general understanding of the concepts rather than demanding absolute perfection.
+You are a supportive, Senior-medium-strict interviewer. 
+Your goal is to evaluate the candidate's answer fairly, being lenient on minor grammatical errors, nervousness, or slight hesitations. Reward effort, partial correctness, and a general understanding of the concepts rather than demanding absolute perfection.
 
-Evaluate the candidate's answer to the following technical question.
+Evaluate the candidate's answer to the following interview question.
 
 Question: {safe_question}
 Candidate's Answer: {safe_answer}
 
 Score the answer from 0 to 100 on three dimensions, keeping your lenient, supportive baseline in mind:
 1. Relevance  – does it reasonably address the core of the question?
-2. Accuracy   – is the technical/factual content generally correct (allow for minor slips)?
+2. Accuracy   – is the factual, domain, or procedural content generally correct (allow for minor slips)?
 3. Clarity    – is the explanation understandable and well-intentioned?
 
 Also provide a single overall score (0-100) and one sentence of brief, encouraging professional feedback.
@@ -172,7 +172,7 @@ Return ONLY a JSON object with this exact structure:
 
     def generate_next_question(self, interview, previous_answer=None, previous_score=None) -> str:
         """
-        Generates the next technical interview question dynamically.
+        Generates the next interview question dynamically.
         Varies difficulty from beginner to professional level based on performance.
         Enforces a conversational flow like two people speaking and strictly prevents duplicate questions.
         """
@@ -204,27 +204,27 @@ Return ONLY a JSON object with this exact structure:
         # Difficulty logic for evaluating candidate from beginner to professional
         if previous_score is None:
             difficulty_instruction = (
-                "Start with a foundational (Beginner level) technical question focusing on a key skill or project "
-                "from their resume to assess basic knowledge relevant to the role."
+                "Start with a foundational (Beginner level) question focusing on a key skill, project, or experience "
+                "from their resume to assess basic knowledge relevant to the Job Description."
             )
         elif previous_score > 85:
             difficulty_instruction = (
-                "The candidate showed excellent proficiency. Ask a highly advanced (Professional/Architectural level) "
-                "question about a complex project, design decision, or advanced skill from their resume to challenge them."
+                "The candidate showed excellent proficiency. Ask an advanced (Professional/Senior level) "
+                "question about a complex project, key decision, or core skill from their resume to challenge them."
             )
         elif previous_score > 60:
             difficulty_instruction = (
-                "The candidate has a good grasp. Ask a solid (Intermediate level) technical question "
-                "concerning a project, tool, or achievement mentioned on their resume to explore their practical experience."
+                "The candidate has a good grasp. Ask a solid (Intermediate level) question "
+                "concerning a project, tool, responsibility, or achievement mentioned on their resume to explore their practical experience."
             )
         else:
             difficulty_instruction = (
-                "The candidate struggled or was average. Ask a clear, direct technical question "
+                "The candidate struggled or was average. Ask a clear, direct question "
                 "about a simpler skill or concept listed on their resume to re-verify their understanding."
             )
 
         prompt = f"""
-You are a Senior Technical Recruiter conducting a live, voice-only, highly interactive and conversational 1-on-1 interview.
+You are a Senior Recruiter / Hiring Manager conducting a live, voice-only, highly interactive and conversational 1-on-1 interview.
 The interview must sound like a natural, friendly two-person conversation.
 
 Job Description (JD):
@@ -243,20 +243,21 @@ PROHIBITED QUESTIONS (You are forbidden from repeating, rephrasing, or asking th
 {already_asked_list}
 
 Instruction:
-1. Act entirely as a human engineer chatting casually. DO NOT sound like a robot or formal recruiter. Use conversational phrasing like "So I noticed...", "I was looking at your background and...", or "I'm curious about...".
+1. Act entirely as a human hiring manager chatting casually. DO NOT sound like a robot or formal recruiter. Use conversational phrasing like "So I noticed...", "I was looking at your background and...", or "I'm curious about...".
 2. {difficulty_instruction}
-3. The interview questions must center heavily on the candidate's actual projects, technical skills, experiences, and achievements listed on their resume, matching them against the Job Description. Ask them to explain specific decisions, technologies, or architectures they worked on in those projects.
-4. STRICT RULE - OUT-OF-JD RESPONSES: If the candidate's answer mentions technologies, tools, or topics outside of the Job Description (JD) requirements, DO NOT generate follow-up questions based on those out-of-JD responses. Pivot smoothly and steer the interview back to skills, topics, or projects relevant to the Job Description requirements.
-5. Maintain a natural flow. If this is a follow-up, pivot naturally based on their last answer (provided it aligns with JD requirements). If they struggled or went off-topic, say "Let me switch gears..." and ask about a different project or skill required by the JD.
-6. NEVER repeat any of the PROHIBITED QUESTIONS listed above.
-7. Make the question sound completely unscripted. It must be spoken naturally and be no longer than 25 words.
-8. Return ONLY the spoken text of the next question. Do not include any quotes, preamble, or metadata.
+3. The interview questions must center heavily on the candidate's actual projects, skills, experiences, and achievements listed on their resume, matching them against the Job Description. Ask them to explain specific decisions, tools, methods, or processes they worked on.
+4. STRICT RULE FOR NON-IT ROLES: First, evaluate if the Job Description (JD) is for a Non-IT role (e.g., HR, Sales, Marketing, Finance, Operations, Customer Service, Legal, Design, Admin, Management, etc.). If it is a Non-IT role, DO NOT ask any software engineering, coding, technical development, or IT questions. Strictly ask questions about the domain, functional skills, soft skills, processes, and core responsibilities explicitly mentioned in the JD and candidate's resume. For IT roles, ask relevant technical/development questions strictly matching the JD.
+5. STRICT RULE - FOR NON-IT ROLES OUT-OF-JD RESPONSES: If the candidate's answer mentions technologies, tools, or topics outside of the Job Description (JD) requirements, DO NOT generate follow-up questions based on those out-of-JD responses. Pivot smoothly and steer the interview back to skills, topics, or projects relevant to the Job Description requirements.
+6. Maintain a natural flow. If this is a follow-up, pivot naturally based on their last answer (provided it aligns with JD requirements). If they struggled or went off-topic, say "Let me switch gears..." and ask about a different project or skill required by the JD.
+7. NEVER repeat any of the PROHIBITED QUESTIONS listed above.
+8. Make the question sound completely unscripted. It must be spoken naturally and be no longer than 25 words.
+9. Return ONLY the spoken text of the next question. Do not include any quotes, preamble, or metadata.
 """
         try:
             return self._chat_text(prompt, temperature=0.85)
         except Exception as e:
             print(f"Groq Error (generate_next_question): {e}")
-            return "Can you explain the technical architecture of a complex project you've led recently?"
+            return "Can you tell me about a key project or achievement from your recent experience that best demonstrates your skills for this role?"
 
 
 
