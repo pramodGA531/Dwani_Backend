@@ -4,6 +4,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 from django.utils import timezone
 from datetime import timedelta, datetime
 from ai_engine.models import Job
@@ -1048,9 +1049,34 @@ class ReportsView(APIView):
                 return Response({"error": "Report not found"}, status=status.HTTP_404_NOT_FOUND)
         
         else:
-            reports = Report.objects.select_related('interview', 'interview__job', 'interview__candidate').prefetch_related('interview__responses').filter(
+            reports = Report.objects.select_related(
+                'interview',
+                'interview__job',
+                'interview__candidate',
+                'interview__candidate__candidate_profile'
+            ).prefetch_related('interview__responses').filter(
                 interview__job__recruiter=user
-            ).order_by('-created_at')
+            )
+
+            search_query = request.query_params.get('search', '').strip()
+            if search_query:
+                reports = reports.filter(
+                    Q(interview__candidate__candidate_profile__full_name__icontains=search_query) |
+                    Q(interview__candidate__email__icontains=search_query) |
+                    Q(interview__job__title__icontains=search_query)
+                )
+
+            sort_by = request.query_params.get('sort', 'recent').strip()
+            if sort_by == 'score-desc':
+                reports = reports.order_by('-overall_score', '-created_at', '-id')
+            elif sort_by == 'score-asc':
+                reports = reports.order_by('overall_score', '-created_at', '-id')
+            elif sort_by == 'name-asc':
+                reports = reports.order_by('interview__candidate__candidate_profile__full_name', 'interview__candidate__email', '-created_at')
+            elif sort_by == 'name-desc':
+                reports = reports.order_by('-interview__candidate__candidate_profile__full_name', '-interview__candidate__email', '-created_at')
+            else:  # 'recent' or default
+                reports = reports.order_by('-created_at', '-id')
             
             paginator = StandardResultsSetPagination()
             paginated_reports = paginator.paginate_queryset(reports, request)
