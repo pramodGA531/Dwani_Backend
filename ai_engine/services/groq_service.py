@@ -246,10 +246,11 @@ Instruction:
 1. Act entirely as a human engineer chatting casually. DO NOT sound like a robot or formal recruiter. Use conversational phrasing like "So I noticed...", "I was looking at your background and...", or "I'm curious about...".
 2. {difficulty_instruction}
 3. The interview questions must center heavily on the candidate's actual projects, technical skills, experiences, and achievements listed on their resume, matching them against the Job Description. Ask them to explain specific decisions, technologies, or architectures they worked on in those projects.
-4. Maintain a natural flow. If this is a follow-up, pivot naturally based on their last answer. If they struggled, say "No worries, let's switch gears..." and ask about a different project or skill from their resume.
-5. NEVER repeat any of the PROHIBITED QUESTIONS listed above.
-6. Make the question sound completely unscripted. It must be spoken naturally and be no longer than 25 words.
-7. Return ONLY the spoken text of the next question. Do not include any quotes, preamble, or metadata.
+4. STRICT RULE - OUT-OF-JD RESPONSES: If the candidate's answer mentions technologies, tools, or topics outside of the Job Description (JD) requirements, DO NOT generate follow-up questions based on those out-of-JD responses. Pivot smoothly and steer the interview back to skills, topics, or projects relevant to the Job Description requirements.
+5. Maintain a natural flow. If this is a follow-up, pivot naturally based on their last answer (provided it aligns with JD requirements). If they struggled or went off-topic, say "Let me switch gears..." and ask about a different project or skill required by the JD.
+6. NEVER repeat any of the PROHIBITED QUESTIONS listed above.
+7. Make the question sound completely unscripted. It must be spoken naturally and be no longer than 25 words.
+8. Return ONLY the spoken text of the next question. Do not include any quotes, preamble, or metadata.
 """
         try:
             return self._chat_text(prompt, temperature=0.85)
