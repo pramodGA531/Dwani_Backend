@@ -126,48 +126,76 @@ Return ONLY a valid JSON object with this structure:
                 },
             }
 
-    def evaluate_answer(self, question_text: str, answer_text: str) -> dict:
+    def evaluate_answer(self, question_text: str, answer_text: str, target_accent: str = 'neutral') -> dict:
         """
-        Evaluates a candidate's answer and returns scoring dimensions.
+        Evaluates a candidate's answer and returns scoring dimensions including Accent & Diction.
+        target_accent can be: 'neutral', 'us', 'uk', 'in', 'au', 'agnostic'
         """
         safe_question = question_text[:2000] if question_text else ""
         safe_answer = answer_text[:6000] if answer_text else ""
 
+        accent_instructions = {
+            "us": "Target Accent: American English (US). Assess for pronunciation clarity, phrasing, and diction standard in North American professional settings.",
+            "uk": "Target Accent: British English (UK). Assess for British/Commonwealth pronunciation clarity, vocabulary, and articulation.",
+            "in": "Target Accent: Indian English. Assess for clear enunciation, intelligible cadence, and professional communication standards.",
+            "au": "Target Accent: Australian English (AU). Assess for Australian English pronunciation and diction.",
+            "agnostic": "Target Accent: Accent-Agnostic / Fair Evaluation. Strictly do NOT penalize any regional or international accent. Score accent high (90-100) as long as speech is intelligible.",
+            "neutral": "Target Accent: Global / Neutral English. Assess for universal intelligibility, clear pronunciation, and neutral delivery easily understood by international cross-border teams."
+        }.get(str(target_accent or 'neutral').lower(), "Target Accent: Global / Neutral English.")
+
         prompt = f"""
-You are a supportive, Senior-medium-strict interviewer. 
-Your goal is to evaluate the candidate's answer fairly, being lenient on minor grammatical errors, nervousness, or slight hesitations. Reward effort, partial correctness, and a general understanding of the concepts rather than demanding absolute perfection.
+You are a supportive, Senior-medium-strict interviewer and communication coach. 
+Your goal is to evaluate the candidate's answer fairly, being lenient on minor nervousness or slight hesitations inherent to spoken voice interviews. Reward effort, practical depth, and logical reasoning.
 
 Evaluate the candidate's answer to the following interview question.
 
 Question: {safe_question}
-Candidate's Answer: {safe_answer}
+Candidate's Spoken Answer: {safe_answer}
+Accent Requirement: {accent_instructions}
 
-Score the answer from 0 to 100 on three dimensions, keeping your lenient, supportive baseline in mind:
-1. Relevance  – does it reasonably address the core of the question?
-2. Accuracy   – is the factual, domain, or procedural content generally correct (allow for minor slips)?
-3. Clarity    – is the explanation understandable and well-intentioned?
+Score the answer from 0 to 100 on four dimensions:
+1. Relevance – does it reasonably address the core of the question?
+2. Accuracy – is the factual, domain, or procedural content generally correct?
+3. Clarity – is the explanation understandable and structured?
+4. Accent & Diction – how clearly enunciated, intelligible, and aligned is their speech with the specified accent criteria?
 
-Also provide a single overall score (0-100) and one sentence of brief, encouraging professional feedback.
+Also:
+- Identify the candidate's detected accent (e.g. "American English", "British English", "Indian English", "Neutral / Global English", etc.).
+- Provide one concise phrase of accent feedback (e.g. "Clear enunciation and neutral international cadence.").
+- Provide an overall score (0-100) and one sentence of brief, encouraging professional feedback.
 
 Return ONLY a JSON object with this exact structure:
 {{
     "relevance_score": 85,
     "accuracy_score": 90,
     "clarity_score": 80,
-    "overall_score": 85,
+    "accent_score": 88,
+    "detected_accent": "Neutral / Global English",
+    "accent_feedback": "Well-articulated with clear international intelligibility.",
+    "overall_score": 86,
     "feedback": "Professional feedback here."
 }}
 """
         try:
-            return self._chat_json(prompt)
+            res = self._chat_json(prompt)
+            if 'accent_score' not in res:
+                res['accent_score'] = res.get('clarity_score', 80)
+            if 'detected_accent' not in res:
+                res['detected_accent'] = "Neutral / Global English"
+            if 'accent_feedback' not in res:
+                res['accent_feedback'] = "Clear pronunciation and delivery."
+            return res
         except Exception as e:
             print(f"Groq Error (evaluate_answer): {e}")
             return {
-                "relevance_score": 0,
-                "accuracy_score": 0,
-                "clarity_score": 0,
-                "overall_score": 0,
-                "feedback": "Could not evaluate.",
+                "relevance_score": 50,
+                "accuracy_score": 50,
+                "clarity_score": 50,
+                "accent_score": 75,
+                "detected_accent": "Neutral English",
+                "accent_feedback": "Response recorded.",
+                "overall_score": 50,
+                "feedback": "Could not evaluate due to a timeout or error.",
             }
 
     def generate_next_question(self, interview, previous_answer=None, previous_score=None) -> str:

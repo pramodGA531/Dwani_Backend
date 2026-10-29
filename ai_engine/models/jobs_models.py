@@ -12,6 +12,7 @@ class Job(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    target_accent = models.CharField(max_length=50, default='neutral', help_text="Target accent: neutral, us, uk, in, au, agnostic")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

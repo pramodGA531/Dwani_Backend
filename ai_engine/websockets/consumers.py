@@ -72,8 +72,11 @@ class InterviewConsumer(AsyncWebsocketConsumer):
         question_index = data.get('question_index', 1)
         question_text = data.get('question_text', '')
 
+        # Retrieve target_accent
+        target_accent = getattr(self.interview, 'target_accent', None) or (getattr(self.interview.job, 'target_accent', None) if getattr(self.interview, 'job', None) else None) or 'neutral'
+
         # Score answer
-        evaluation = await self.evaluate_answer(question_text, answer_text)
+        evaluation = await self.evaluate_answer(question_text, answer_text, target_accent=target_accent)
 
         # Persist response
         await self.save_response(question_index, question_text, answer_text, evaluation)
@@ -197,6 +200,9 @@ class InterviewConsumer(AsyncWebsocketConsumer):
             relevance_score=evaluation.get('relevance_score'),
             accuracy_score=evaluation.get('accuracy_score'),
             clarity_score=evaluation.get('clarity_score'),
+            accent_score=evaluation.get('accent_score'),
+            detected_accent=evaluation.get('detected_accent'),
+            accent_feedback=evaluation.get('accent_feedback'),
         )
 
     @sync_to_async
@@ -209,6 +215,6 @@ class InterviewConsumer(AsyncWebsocketConsumer):
         )
 
     @sync_to_async
-    def evaluate_answer(self, question_text, answer_text):
+    def evaluate_answer(self, question_text, answer_text, target_accent='neutral'):
         service = GroqAIService()
-        return service.evaluate_answer(question_text, answer_text)
+        return service.evaluate_answer(question_text, answer_text, target_accent=target_accent)

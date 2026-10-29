@@ -12,6 +12,9 @@ class Report(models.Model):
     strengths = models.TextField(blank=True)
     weaknesses = models.TextField(blank=True)
     recommendation = models.TextField(blank=True)
+    accent_score = models.FloatField(null=True, blank=True)
+    detected_accent = models.CharField(max_length=100, blank=True, null=True)
+    accent_summary = models.TextField(blank=True, null=True)
     
     resume_mismatch_flag = models.BooleanField(default=False)
     pdf_s3_url = models.URLField(max_length=500, blank=True)

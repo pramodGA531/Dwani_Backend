@@ -39,6 +39,7 @@ class Interview(models.Model):
     start_time   = models.TimeField(null=True, blank=True)
     created_at   = models.DateTimeField(auto_now_add=True)
     ats_score    = models.IntegerField(null=True, blank=True)
+    target_accent = models.CharField(max_length=50, default='neutral', help_text="Target accent: neutral, us, uk, in, au, agnostic")
 
     @property
     def candidate_name(self):
@@ -61,6 +62,9 @@ class Response(models.Model):
     relevance_score = models.FloatField(null=True, blank=True)
     accuracy_score  = models.FloatField(null=True, blank=True)
     clarity_score   = models.FloatField(null=True, blank=True)
+    accent_score    = models.FloatField(null=True, blank=True)
+    detected_accent = models.CharField(max_length=100, blank=True, null=True)
+    accent_feedback = models.TextField(blank=True, null=True)
 
     timestamp = models.DateTimeField(auto_now_add=True)
 

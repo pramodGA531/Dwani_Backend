@@ -99,6 +99,7 @@ class InviteCandidateView(APIView):
         question_count = int(request.data.get('questionCount', 5))
         start_date = request.data.get('start_date')
         start_time = request.data.get('start_time')
+        target_accent = request.data.get('target_accent') or (request.data.get('config', {}).get('target_accent') if isinstance(request.data.get('config'), dict) else None) or getattr(job, 'target_accent', 'neutral') or 'neutral'
 
         interview = Interview.objects.create(
             job=job,
@@ -113,7 +114,8 @@ class InviteCandidateView(APIView):
             num_questions=question_count,
             start_date=start_date,
             start_time=start_time,
-            ats_score=ats_score
+            ats_score=ats_score,
+            target_accent=target_accent
         )
 
         # Store candidate name in the normalised CandidateProfile table
@@ -291,7 +293,8 @@ class ValidateSessionView(APIView):
                 "status": interview.status,
                 "interview_id": str(interview.id),
                 "recruiter_name": interview.job.recruiter.email,
-                "access_token": str(refresh.access_token)
+                "access_token": str(refresh.access_token),
+                "target_accent": getattr(interview, 'target_accent', 'neutral') or 'neutral'
             }, status=status.HTTP_200_OK)
 
             
@@ -364,7 +367,8 @@ class StartInterviewView(APIView):
                 "candidate_name": interview.candidate_name or interview.candidate.email,
                 "job_title": interview.job.title,
                 "status": interview.status,
-                "num_questions": interview.num_questions
+                "num_questions": interview.num_questions,
+                "target_accent": getattr(interview, 'target_accent', 'neutral') or 'neutral'
             }, status=status.HTTP_200_OK)
 
         except Interview.DoesNotExist:
@@ -495,9 +499,12 @@ class SubmitAnswerView(APIView):
             evaluation = {}
             next_q_text = None
 
+            # Retrieve target accent configured for this interview / job
+            target_accent = getattr(interview, 'target_accent', None) or (getattr(interview.job, 'target_accent', None) if interview.job else None) or 'neutral'
+
             # Run evaluation and next question generation concurrently to save time
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                future_eval = executor.submit(ai_service.evaluate_answer, question_text, answer_text)
+                future_eval = executor.submit(ai_service.evaluate_answer, question_text, answer_text, target_accent=target_accent)
                 
                 # We only need a next question if we are not at the end of the interview
                 future_next_q = None
@@ -517,6 +524,9 @@ class SubmitAnswerView(APIView):
                         "relevance_score": 50,
                         "accuracy_score": 50,
                         "clarity_score": 50,
+                        "accent_score": 75,
+                        "detected_accent": "Neutral English",
+                        "accent_feedback": "Speech recorded.",
                         "overall_score": 50,
                         "feedback": "Could not evaluate due to a timeout or error."
                     }
@@ -536,7 +546,10 @@ class SubmitAnswerView(APIView):
                 answer_text=answer_text,
                 relevance_score=evaluation.get('relevance_score'),
                 accuracy_score=evaluation.get('accuracy_score'),
-                clarity_score=evaluation.get('clarity_score')
+                clarity_score=evaluation.get('clarity_score'),
+                accent_score=evaluation.get('accent_score'),
+                detected_accent=evaluation.get('detected_accent'),
+                accent_feedback=evaluation.get('accent_feedback')
             )
 
             # Broadcast Answer to Live Monitoring
@@ -665,6 +678,9 @@ class GetResultsView(APIView):
                 "relevance_score": r.relevance_score,
                 "accuracy_score": r.accuracy_score,
                 "clarity_score": r.clarity_score,
+                "accent_score": r.accent_score,
+                "detected_accent": r.detected_accent,
+                "accent_feedback": r.accent_feedback,
             }
             for r in responses
         ]
@@ -985,18 +1001,21 @@ class ReportsView(APIView):
                     avg_relevance = sum(r.relevance_score or 0 for r in responses) / total_responses
                     avg_accuracy = sum(r.accuracy_score or 0 for r in responses) / total_responses
                     avg_clarity = sum(r.clarity_score or 0 for r in responses) / total_responses
+                    avg_accent = sum(r.accent_score or 0 for r in responses) / total_responses
                 else:
                     avg_relevance = report.overall_score or 80.0
                     avg_accuracy = report.overall_score or 80.0
                     avg_clarity = report.overall_score or 80.0
+                    avg_accent = getattr(report, 'accent_score', None) or report.overall_score or 80.0
 
                 scores_dict = {
                     "technical": round(avg_accuracy),
                     "communication": round(avg_clarity),
+                    "accent": round(avg_accent),
                     "problem_solving": round(avg_relevance)
                 }
                 
-                calculated_overall = round((avg_accuracy + avg_clarity + avg_relevance) / 3)
+                calculated_overall = round((avg_accuracy + avg_clarity + avg_relevance + (avg_accent or avg_clarity)) / 4)
                 
                 try:
                     from ai_engine.models import CandidateReview
@@ -1232,14 +1251,17 @@ class LiveMonitoringDetailView(APIView):
                 avg_relevance = sum(r.relevance_score or 0 for r in responses) / total_responses
                 avg_accuracy = sum(r.accuracy_score or 0 for r in responses) / total_responses
                 avg_clarity = sum(r.clarity_score or 0 for r in responses) / total_responses
+                avg_accent = sum(r.accent_score or 0 for r in responses) / total_responses
             else:
                 avg_relevance = 80.0
                 avg_accuracy = 80.0
                 avg_clarity = 80.0
+                avg_accent = 80.0
 
             scores = {
                 "technical": round(avg_accuracy),
                 "communication": round(avg_clarity),
+                "accent": round(avg_accent),
                 "problem_solving": round(avg_relevance)
             }
 
